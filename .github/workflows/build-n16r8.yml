@@ -20,12 +20,21 @@ jobs:
         run: |
           echo "=== ROM directory ==="
 
-          if [ -d "roms/gbc" ]; then
-            find roms/gbc -maxdepth 1 -type f -print
-          else
+          if [ ! -d "roms/gbc" ]; then
             echo "ERROR: roms/gbc directory does not exist"
             exit 1
           fi
+
+          if ! find roms/gbc -maxdepth 1 -type f -iname "*.gbc" | grep -q .; then
+            echo "ERROR: No .gbc ROM found in roms/gbc/"
+            exit 1
+          fi
+
+          find roms/gbc -maxdepth 1 -type f -iname "*.gbc" -print
+
+      - name: Check Python syntax
+        run: |
+          python3 -m py_compile rg_tool.py
 
       - name: Build Retro-Go Docker image
         run: |
@@ -54,7 +63,7 @@ jobs:
 
       - name: Verify final firmware
         run: |
-          IMG=$(find output -maxdepth 1 -name "*.img" | head -n 1)
+          IMG=$(find output -maxdepth 1 -type f -name "*.img" | head -n 1)
 
           if [ -z "$IMG" ]; then
             echo "ERROR: No .img firmware was produced"
@@ -78,5 +87,4 @@ jobs:
           name: Retro-Go-ESP32-S3-N16R8
           path: |
             output/*.img
-            output/vfs.img
           if-no-files-found: error
