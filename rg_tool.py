@@ -25,20 +25,12 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "Retro-Go")
 PROJECT_ICON = os.getenv("PROJECT_ICON", "assets/icon.raw")
 
 PROJECT_APPS = {
-    # Project name  Type, SubType, Size
     "launcher":     [0, 16, 1048576],
     "retro-core":   [0, 16, 1048576],
     "prboom-go":    [0, 16, 786432],
     "gwenesis":     [0, 16, 1048576],
     "fmsx":         [0, 16, 589824],
 }
-
-# PROJECT_APPS = {}
-# for t in glob.glob("*/CMakeLists.txt"):
-#     name = os.path.basename(os.path.dirname(t))
-#     if name not in PROJECT_APPS:
-#         PROJECT_APPS[name] = [0, 0, 0]
-
 
 try:
     PROJECT_VER = os.getenv("PROJECT_VER") or subprocess.check_output(
@@ -48,41 +40,22 @@ try:
 except:
     PROJECT_VER = "unknown"
 
-
 FW_FORMAT = "none"
-
 
 TARGETS = []
 
 for t in glob.glob("components/retro-go/targets/*/config.h"):
-    TARGETS.append(
-        os.path.basename(os.path.dirname(t))
-    )
-
+    TARGETS.append(os.path.basename(os.path.dirname(t)))
 
 IDF_TARGET = os.getenv("IDF_TARGET", "esp32")
 IDF_PATH = os.getenv("IDF_PATH")
 
 if not IDF_PATH:
-    exit(
-        "IDF_PATH is not defined. "
-        "Are you running inside esp-idf environment?"
-    )
-
+    exit("IDF_PATH is not defined. Are you running inside esp-idf environment?")
 
 if os.name == "nt":
-    IDF_PY = os.path.join(
-        IDF_PATH,
-        "tools",
-        "idf.py"
-    )
-
-    IDF_MONITOR_PY = os.path.join(
-        IDF_PATH,
-        "tools",
-        "idf_monitor.py"
-    )
-
+    IDF_PY = os.path.join(IDF_PATH, "tools", "idf.py")
+    IDF_MONITOR_PY = os.path.join(IDF_PATH, "tools", "idf_monitor.py")
     ESPTOOL_PY = os.path.join(
         IDF_PATH,
         "components",
@@ -90,21 +63,18 @@ if os.name == "nt":
         "esptool",
         "esptool.py"
     )
-
     PARTTOOL_PY = os.path.join(
         IDF_PATH,
         "components",
         "partition_table",
         "parttool.py"
     )
-
     GEN_ESP32PART_PY = os.path.join(
         IDF_PATH,
         "components",
         "partition_table",
         "gen_esp32part.py"
     )
-
 else:
     IDF_PY = "idf.py"
     IDF_MONITOR_PY = "idf_monitor.py"
@@ -112,17 +82,11 @@ else:
     PARTTOOL_PY = "parttool.py"
     GEN_ESP32PART_PY = "gen_esp32part.py"
 
-
-MKFW_PY = os.path.join(
-    "tools",
-    "mkfw.py"
-)
+MKFW_PY = os.path.join("tools", "mkfw.py")
 
 
 def run(cmd, cwd=None, check=True):
-    print(
-        f"Running command: {' '.join(cmd)}"
-    )
+    print("Running command: %s" % " ".join(cmd))
 
     if os.name == "nt" and cmd[0].endswith(".py"):
         return subprocess.run(
@@ -138,6 +102,50 @@ def run(cmd, cwd=None, check=True):
         cwd=cwd,
         check=check
     )
+
+
+def parse_size(value):
+    """
+    Convert sizes such as:
+
+        8M
+        8MB
+        500K
+        500KB
+        1048576
+
+    into an integer number of bytes.
+    """
+
+    if value is None:
+        return 0
+
+    if isinstance(value, int):
+        return value
+
+    value = str(value).strip().upper()
+
+    match = re.fullmatch(
+        r"([0-9]+(?:\.[0-9]+)?)\s*([KMG]?)B?",
+        value
+    )
+
+    if not match:
+        raise ValueError(
+            "Invalid FAT size: %s" % value
+        )
+
+    number = float(match.group(1))
+    unit = match.group(2)
+
+    multipliers = {
+        "": 1,
+        "K": 1024,
+        "M": 1024 * 1024,
+        "G": 1024 * 1024 * 1024,
+    }
+
+    return int(number * multipliers[unit])
 
 
 def build_image(
@@ -166,11 +174,6 @@ def build_image(
         PROJECT_VER
     ]
 
-
-    # ---------------------------------------------------------
-    # ESP32 bootloader
-    # ---------------------------------------------------------
-
     if img_type not in ["odroid", "esplay"]:
 
         print("Building bootloader...")
@@ -184,7 +187,6 @@ def build_image(
         )
 
         if not os.path.exists(bootloader_file):
-
             run(
                 [IDF_PY, "bootloader"],
                 cwd=os.path.join(
@@ -200,15 +202,7 @@ def build_image(
             bootloader_file
         ]
 
-
-    args += [
-        output_file
-    ]
-
-
-    # ---------------------------------------------------------
-    # Add application partitions
-    # ---------------------------------------------------------
+    args += [output_file]
 
     ota_next_id = 16
 
@@ -222,7 +216,6 @@ def build_image(
             part[0] == 0
             and (part[1] & 0xF0) == 0x10
         ):
-            # Rewrite OTA indexes to maintain order
             subtype = ota_next_id
             ota_next_id += 1
 
@@ -238,49 +231,61 @@ def build_image(
             )
         ]
 
-
     # ---------------------------------------------------------
-    # Add internal flash VFS partition
-    #
-    # IMPORTANT:
-    # This must be OUTSIDE the app loop.
-    # It adds the VFS only once.
+    # Add VFS partition ONCE, after all applications
     # ---------------------------------------------------------
 
     if fatsize:
 
-        vfs_file = (
-            "vfs.img"
-            if os.path.exists("vfs.img")
-            else "none"
-        )
+        fatsize_bytes = parse_size(fatsize)
 
-        if vfs_file != "none":
+        vfs_file = "vfs.img"
 
-            print(
-                "Using VFS image: "
-                + os.path.abspath(vfs_file)
-            )
-
-        else:
-
+        if not os.path.exists(vfs_file):
             print(
                 "WARNING: vfs.img not found. "
                 "Creating empty VFS partition."
             )
+            vfs_file = "none"
+        else:
+            actual_vfs_size = os.path.getsize(vfs_file)
+
+            print(
+                "Using VFS image: %s"
+                % os.path.abspath(vfs_file)
+            )
+
+            print(
+                "VFS requested size: %d bytes"
+                % fatsize_bytes
+            )
+
+            print(
+                "VFS actual image size: %d bytes"
+                % actual_vfs_size
+            )
+
+            if actual_vfs_size > fatsize_bytes:
+                raise RuntimeError(
+                    "vfs.img is larger than the requested "
+                    "FAT partition size: %d > %d"
+                    % (
+                        actual_vfs_size,
+                        fatsize_bytes
+                    )
+                )
 
         args += [
             "1",
             "129",
-            fatsize,
+            str(fatsize_bytes),
             "vfs",
             vfs_file
         ]
 
-
-    # ---------------------------------------------------------
-    # Build final image
-    # ---------------------------------------------------------
+    print(
+        "Running mkfw with VFS size in bytes."
+    )
 
     run(args)
 
@@ -310,7 +315,6 @@ def clean_app(app):
     except:
         pass
 
-
     try:
         shutil.rmtree(
             os.path.join(
@@ -321,7 +325,6 @@ def clean_app(app):
 
     except:
         pass
-
 
     print("Done.\n")
 
@@ -334,9 +337,6 @@ def build_app(
     is_release=False
 ):
 
-    # To do: clean up if any of the flags changed
-    # since last build
-
     print(
         "Building app '%s'"
         % app
@@ -348,39 +348,40 @@ def build_app(
     ]
 
     args.append(
-        f"-DRG_PROJECT_APP={app}"
+        "-DRG_PROJECT_APP=%s"
+        % app
     )
 
     args.append(
-        f"-DRG_PROJECT_VER={PROJECT_VER}"
+        "-DRG_PROJECT_VER=%s"
+        % PROJECT_VER
     )
 
     args.append(
-        f"-DRG_BUILD_TARGET="
-        f"RG_TARGET_"
-        f"{re.sub(r'[^A-Z0-9]', '_', device_type.upper())}"
+        "-DRG_BUILD_TARGET=RG_TARGET_%s"
+        % re.sub(
+            r"[^A-Z0-9]",
+            "_",
+            device_type.upper()
+        )
     )
 
     args.append(
-        f"-DRG_BUILD_RELEASE="
-        f"{1 if is_release else 0}"
+        "-DRG_BUILD_RELEASE=%d"
+        % (1 if is_release else 0)
     )
 
     args.append(
-        f"-DRG_ENABLE_PROFILING="
-        f"{1 if with_profiling else 0}"
+        "-DRG_ENABLE_PROFILING=%d"
+        % (1 if with_profiling else 0)
     )
 
     args.append(
-        f"-DRG_ENABLE_NETWORKING="
-        f"{0 if no_networking else 1}"
+        "-DRG_ENABLE_NETWORKING=%d"
+        % (0 if no_networking else 1)
     )
 
-
-    with open(
-        "partitions.csv",
-        "w"
-    ) as f:
+    with open("partitions.csv", "w") as f:
 
         f.write(
             "# This table isn't used, "
@@ -391,7 +392,6 @@ def build_app(
         f.write(
             "dummy, app, ota_0, 65536, 3145728\n"
         )
-
 
     run(
         args,
@@ -425,7 +425,6 @@ def flash_app(
         port
     )
 
-
     if not os.path.exists(
         "partitions.bin"
     ):
@@ -453,7 +452,6 @@ def flash_app(
             check=False
         )
 
-
     app_bin = os.path.join(
         app,
         "build",
@@ -461,10 +459,12 @@ def flash_app(
     )
 
     print(
-        f"Flashing '{app_bin}' "
-        f"to port {port}"
+        "Flashing '%s' to port %s"
+        % (
+            app_bin,
+            port
+        )
     )
-
 
     run(
         [
@@ -504,9 +504,11 @@ def flash_image(
     )
 
     print(
-        f"Flashing image file "
-        f"'{image_file}' "
-        f"to {port}"
+        "Flashing image file '%s' to %s"
+        % (
+            image_file,
+            port
+        )
     )
 
     run(
@@ -530,8 +532,8 @@ def monitor_app(
 ):
 
     print(
-        f"Starting monitor "
-        f"for app {app}"
+        "Starting monitor for app %s"
+        % app
     )
 
     elf_file = os.path.join(
@@ -554,10 +556,6 @@ def monitor_app(
 
     else:
 
-        # We must pass a file to
-        # idf_monitor.py but it doesn't
-        # have to be valid with -d
-
         run(
             [
                 IDF_MONITOR_PY,
@@ -577,7 +575,6 @@ parser = argparse.ArgumentParser(
     description="Retro-Go build tool"
 )
 
-
 parser.add_argument(
     "command",
     choices=[
@@ -594,7 +591,6 @@ parser.add_argument(
     ]
 )
 
-
 parser.add_argument(
     "apps",
     nargs="*",
@@ -604,14 +600,12 @@ parser.add_argument(
     ] + list(PROJECT_APPS.keys())
 )
 
-
 parser.add_argument(
     "--target",
     default=DEFAULT_TARGET,
     choices=set(TARGETS),
     help="Device to target"
 )
-
 
 parser.add_argument(
     "--no-networking",
@@ -620,20 +614,17 @@ parser.add_argument(
     help="Build without networking support"
 )
 
-
 parser.add_argument(
     "--port",
     default=DEFAULT_PORT,
     help="Serial port to use for flash and monitor"
 )
 
-
 parser.add_argument(
     "--baud",
     default=DEFAULT_BAUD,
     help="Serial baudrate to use for flashing"
 )
-
 
 parser.add_argument(
     "--fatsize",
@@ -644,7 +635,6 @@ parser.add_argument(
     )
 )
 
-
 args = parser.parse_args()
 
 
@@ -653,13 +643,13 @@ args = parser.parse_args()
 # ============================================================
 
 if os.path.exists(
-    f"components/retro-go/targets/"
-    f"{args.target}/env.py"
+    "components/retro-go/targets/%s/env.py"
+    % args.target
 ):
 
     with open(
-        f"components/retro-go/targets/"
-        f"{args.target}/env.py",
+        "components/retro-go/targets/%s/env.py"
+        % args.target,
         "rb"
     ) as f:
 
@@ -668,11 +658,6 @@ if os.path.exists(
         )
 
         exec(f.read())
-
-        # Detect if env.py modified
-        # os.environ[IDF_TARGET]
-        # instead of IDF_TARGET
-        # (old behavior)
 
         if os.getenv(
             "IDF_TARGET"
@@ -684,15 +669,15 @@ if os.path.exists(
 
 
 if os.path.exists(
-    f"components/retro-go/targets/"
-    f"{args.target}/sdkconfig"
+    "components/retro-go/targets/%s/sdkconfig"
+    % args.target
 ):
 
     os.putenv(
         "SDKCONFIG_DEFAULTS",
         os.path.abspath(
-            f"components/retro-go/targets/"
-            f"{args.target}/sdkconfig"
+            "components/retro-go/targets/%s/sdkconfig"
+            % args.target
         )
     )
 
@@ -703,21 +688,13 @@ os.putenv(
 )
 
 
-# ============================================================
-# COMMAND
-# ============================================================
-
 command = args.command
-
 
 apps = (
     DEFAULT_APPS.split()
     if "all" in args.apps
     else args.apps
 )
-
-
-# Ensure ordering and uniqueness
 
 apps = [
     app
@@ -727,7 +704,7 @@ apps = [
 
 
 # ============================================================
-# BUILD
+# MAIN
 # ============================================================
 
 try:
@@ -770,10 +747,6 @@ try:
             )
 
 
-    # ========================================================
-    # FW PACKING
-    # ========================================================
-
     if command in [
         "build-fw",
         "release"
@@ -797,7 +770,6 @@ try:
                 )
             ).lower()
 
-
             build_image(
                 apps,
                 fw_file,
@@ -814,10 +786,6 @@ try:
                 "try build-img!"
             )
 
-
-    # ========================================================
-    # ESP32 IMAGE
-    # ========================================================
 
     if command in [
         "build-img",
@@ -838,7 +806,6 @@ try:
             )
         ).lower()
 
-
         build_image(
             apps,
             img_file,
@@ -848,10 +815,6 @@ try:
             PROJECT_VER
         )
 
-
-    # ========================================================
-    # INSTALL
-    # ========================================================
 
     if command in [
         "install"
@@ -871,17 +834,12 @@ try:
             )
         ).lower()
 
-
         flash_image(
             img_file,
             args.port,
             args.baud
         )
 
-
-    # ========================================================
-    # FLASH APP
-    # ========================================================
 
     if command in [
         "flash",
@@ -897,10 +855,8 @@ try:
             os.unlink(
                 "partitions.bin"
             )
-
         except:
             pass
-
 
         for app in apps:
 
@@ -910,10 +866,6 @@ try:
                 args.baud
             )
 
-
-    # ========================================================
-    # MONITOR
-    # ========================================================
 
     if command in [
         "monitor",
@@ -933,18 +885,19 @@ try:
         )
 
 
-    print(
-        "All done!"
-    )
+    print("All done!")
 
 
-except KeyboardInterrupt as e:
+except KeyboardInterrupt:
 
     exit("\n")
 
 
 except Exception as e:
 
-    exit(
-        f"\nTask failed: {e}"
+    print(
+        "\nTask failed: %s"
+        % e
     )
+
+    raise
