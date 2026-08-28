@@ -1,0 +1,99 @@
+name: Build ESP32-S3 N16R8 Retro-Go
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install FAT tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools
+
+      - name: Build Retro-Go Docker image
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: retro-go:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Retro-Go image
+        run: |
+          mkdir -p build
+
+          docker run --rm \
+            -v "$PWD/build:/build" \
+            retro-go:latest \
+            sh -c 'cp /app/*.img /build/'
+
+          ls -lh build/
+
+      - name: Prepare VFS directory
+        run: |
+          mkdir -p vfs/roms/gbc
+          mkdir -p vfs/roms/gb
+          mkdir -p vfs/retro-go/config
+          mkdir -p vfs/retro-go/saves
+
+      - name: Copy ROMs
+        run: |
+          if [ -d "roms" ]; then
+            cp -r roms/* vfs/roms/ || true
+          fi
+
+          find vfs -type f -print
+
+      - name: Create VFS image
+        env:
+          VFS_SIZE_MB: 8
+          VFS_SOURCE: vfs
+          VFS_IMAGE: vfs.img
+        run: |
+          python3 tools/make_vfs.py
+
+      - name: Inject VFS into firmware image
+        run: |
+          IMG=$(find build -name "*.img" | head -n 1)
+
+          if [ -z "$IMG" ]; then
+            echo "No firmware image found"
+            exit 1
+          fi
+
+          python3 tools/inject_vfs.py "$IMG" vfs.img
+
+      - name: Verify firmware size
+        run: |
+          ls -lh build/*.img
+
+          SIZE=$(stat -c%s build/*.img)
+
+          echo "Firmware size: $SIZE bytes"
+
+          if [ "$SIZE" -gt 16777216 ]; then
+            echo "ERROR: Firmware is larger than 16 MB"
+            exit 1
+          fi
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: ESP32-S3-N16R8-Retro-Go
+          path: |
+            build/*.img
+            vfs.img
