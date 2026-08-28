@@ -2,12 +2,12 @@
 #define RG_TARGET_NAME             "ESP32-S3-DEVKIT"
 
 // Storage
-#define RG_STORAGE_ROOT             "/sd"
-#define RG_STORAGE_SDSPI_HOST       SPI3_HOST
-#define RG_STORAGE_SDSPI_SPEED      SDMMC_FREQ_DEFAULT
+#define RG_STORAGE_ROOT             "/storage"
+//#define RG_STORAGE_SDSPI_HOST       SPI3_HOST
+//#define RG_STORAGE_SDSPI_SPEED      SDMMC_FREQ_DEFAULT
 // #define RG_STORAGE_SDMMC_HOST       SDMMC_HOST_SLOT_1
 // #define RG_STORAGE_SDMMC_SPEED      SDMMC_FREQ_DEFAULT
-// #define RG_STORAGE_FLASH_PARTITION  "vfs"
+#define RG_STORAGE_FLASH_PARTITION  "vfs"
 
 // Audio
 #define RG_AUDIO_USE_INT_DAC        0   // 0 = Disable, 1 = GPIO25, 2 = GPIO26, 3 = Both
