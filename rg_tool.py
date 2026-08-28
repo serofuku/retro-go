@@ -91,7 +91,8 @@ def build_image(apps, output_file, img_type="odroid", fatsize=0, target="unknown
             ota_next_id += 1
         args += [str(part[0]), str(subtype), str(part[2]), app, os.path.join(app, "build", app + ".bin")]
     if fatsize:
-        args += ["1", "129", fatsize, "vfs", "none"]
+    vfs_file = "vfs.img" if os.path.exists("vfs.img") else "none"
+    args += ["1", "129", fatsize, "vfs", vfs_file]
 
     run(args)
 
