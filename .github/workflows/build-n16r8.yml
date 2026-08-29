@@ -25,11 +25,14 @@ jobs:
             exit 1
           fi
 
-          if ! find roms/gbc -maxdepth 1 -type f -iname "*.gbc" | grep -q .; then
+          ROM_COUNT=$(find roms/gbc -maxdepth 1 -type f -iname "*.gbc" | wc -l)
+
+          if [ "$ROM_COUNT" -eq 0 ]; then
             echo "ERROR: No .gbc ROM found in roms/gbc/"
             exit 1
           fi
 
+          echo "Found $ROM_COUNT GBC ROM(s):"
           find roms/gbc -maxdepth 1 -type f -iname "*.gbc" -print
 
       - name: Check Python syntax
@@ -44,11 +47,18 @@ jobs:
 
       - name: Create output directory
         run: |
+          rm -rf output
           mkdir -p output
 
       - name: Extract firmware image
         run: |
+          echo "=== Creating build container ==="
+
           CONTAINER=$(docker create retro-go-n16r8:latest)
+
+          echo "Container: $CONTAINER"
+
+          echo "=== Extracting build files ==="
 
           docker cp \
             "$CONTAINER:/app/." \
@@ -61,14 +71,30 @@ jobs:
           echo "=== Build output ==="
           ls -lah output/
 
+          echo
+          echo "=== IMG files ==="
+          find output -maxdepth 1 -type f -name "*.img" -print
+
       - name: Verify final firmware
         run: |
-          IMG=$(find output -maxdepth 1 -type f -name "*.img" | head -n 1)
+          echo "=== Verifying firmware ==="
 
-          if [ -z "$IMG" ]; then
+          IMG_COUNT=$(find output -maxdepth 1 -type f -name "*.img" | wc -l)
+
+          if [ "$IMG_COUNT" -eq 0 ]; then
             echo "ERROR: No .img firmware was produced"
+            echo
+            echo "Files found in output:"
+            find output -maxdepth 1 -type f -printf "%f\n"
             exit 1
           fi
+
+          if [ "$IMG_COUNT" -gt 1 ]; then
+            echo "WARNING: Multiple .img files were produced:"
+            find output -maxdepth 1 -type f -name "*.img" -print
+          fi
+
+          IMG=$(find output -maxdepth 1 -type f -name "*.img" | head -n 1)
 
           SIZE=$(stat -c%s "$IMG")
 
@@ -77,9 +103,14 @@ jobs:
           echo "Size: $(numfmt --to=iec "$SIZE")"
 
           if [ "$SIZE" -gt 16777216 ]; then
+            echo
             echo "ERROR: Firmware is larger than 16 MB"
+            echo "ESP32-S3 N16R8 has 16 MB flash."
             exit 1
           fi
+
+          echo
+          echo "Firmware is within the 16 MB flash limit."
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
